@@ -32,3 +32,27 @@ jobs:
         run: |
           echo "CI pipeline completed successfully"
           date
+
+      - name: Slack Success Notification
+        if: success()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          payload: |
+            {
+              "text": "✅ CI Pipeline succeeded for devops-webapp"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Slack Failure Notification
+        if: failure()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          payload: |
+            {
+              "text": "❌ CI Pipeline failed for devops-webapp"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
