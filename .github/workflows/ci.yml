@@ -81,8 +81,22 @@ jobs:
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
 
+      - name: Check whether Slack is configured
+        id: slack-config
+        if: always() && github.event_name == 'push'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -n "$SLACK_WEBHOOK_URL" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Slack notifications skipped: SLACK_WEBHOOK_URL secret is not configured."
+          fi
+
       - name: Slack Success Notification
-        if: success() && github.event_name == 'push' && secrets.SLACK_WEBHOOK_URL != ''
+        if: success() && steps.slack-config.outputs.enabled == 'true'
         uses: slackapi/slack-github-action@v2.1.1
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -93,7 +107,7 @@ jobs:
             }
 
       - name: Slack Failure Notification
-        if: failure() && github.event_name == 'push' && secrets.SLACK_WEBHOOK_URL != ''
+        if: failure() && steps.slack-config.outputs.enabled == 'true'
         uses: slackapi/slack-github-action@v2.1.1
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
