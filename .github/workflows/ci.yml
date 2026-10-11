@@ -1,4 +1,3 @@
-
 name: Secure DevSecOps CI Pipeline
 
 on:
@@ -9,12 +8,12 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
-  test-and-build:
-    name: Test and Build Docker Image
+  test-build-scan:
+    name: Test, Build, and Scan
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -27,7 +26,7 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
       - name: Run automated tests
         run: python -m pytest -v
@@ -35,6 +34,71 @@ jobs:
       - name: Build Docker image
         run: docker build -t secure-devsecops-app:${{ github.sha }} .
 
-      - name: Report success
-        if: success()
-        run: echo "Tests passed and Docker image built successfully."
+      - name: Scan repository with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: secure-devsecops-app:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Check whether SonarCloud is configured
+        id: sonar-config
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        shell: bash
+        run: |
+          if [[ -n "$SONAR_TOKEN" && -n "$SONAR_ORGANIZATION" && -n "$SONAR_PROJECT_KEY" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "SonarCloud scan skipped: configure SONAR_TOKEN secret and SONAR_ORGANIZATION / SONAR_PROJECT_KEY repository variables."
+          fi
+
+      - name: SonarCloud code quality analysis
+        if: steps.sonar-config.outputs.enabled == 'true'
+        uses: SonarSource/sonarcloud-github-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+
+      - name: Slack Success Notification
+        if: success() && github.event_name == 'push' && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "✅ Secure DevSecOps CI Pipeline succeeded for ${{ github.repository }}"
+            }
+
+      - name: Slack Failure Notification
+        if: failure() && github.event_name == 'push' && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "❌ Secure DevSecOps CI Pipeline failed for ${{ github.repository }}. Check GitHub Actions logs."
+            }
